@@ -16,7 +16,7 @@ grammar JSS;
 
 program        : topLevelDecl* EOF ;
 
-topLevelDecl   : varDecl | constDecl | funcDecl | classDecl ;
+topLevelDecl   : funcDecl | classDecl | statement ;
 
 // ---- Declarações de variáveis / constantes ----
 varDecl        : 'let' type arrayDim? varInit (',' varInit)* ';' ;
@@ -32,15 +32,14 @@ type           : 'int' | 'real' | 'str' | 'bool' | IDENTIFIER ; // IDENTIFIER = 
 
 // ---- Funções ----
 funcDecl       : 'function' returnType IDENTIFIER '(' paramList? ')' block ;
-returnType     : type | 'void' ;
+returnType     : type arrayDim? | 'void' ;
 paramList      : param (',' param)* ;
 param          : type arrayDim? IDENTIFIER ;
 
 // ---- Classes ----
 classDecl       : 'class' IDENTIFIER '{' attrDecl+ constructorDecl methodDecl* '}' ;
 attrDecl        : type arrayDim? IDENTIFIER ';' ;
-constructorDecl : IDENTIFIER 'constructor' '(' paramList? ')' '{' ctorAssign* '}' ;
-ctorAssign      : 'this' '.' IDENTIFIER '=' expr ';' ;
+constructorDecl : IDENTIFIER 'constructor' '(' paramList? ')' block ;
 methodDecl      : returnType IDENTIFIER '(' paramList? ')' block ;
 
 // ---- Comandos ----
@@ -75,6 +74,7 @@ expr
     : expr '[' expr ']'                                  # indexExpr    // postfix (mais alta)
     | expr '.' IDENTIFIER ('(' argList? ')')?            # memberExpr   // attr/método; console.log
     | expr '(' argList? ')'                              # callExpr     // f(args)
+    | expr op=('++' | '--')                              # postfixExpr  // i++, i--
     | op=('!' | '+' | '-' | '++' | '--') expr           # unaryExpr    // prec 1
     | <assoc=right> expr '**' expr                       # powExpr      // prec 2
     | expr op=('*' | '/' | '%') expr                     # mulExpr      // prec 3
@@ -84,7 +84,7 @@ expr
     | expr '&&' expr                                     # andExpr      // prec 6
     | expr '||' expr                                     # orExpr       // prec 7
     | <assoc=right>
-      expr op=('=' | '+=' | '-=' | '*=' | '/=' | '%=' | '**=') expr  # assignExpr // prec 8
+      expr op=('=' | '+=' | '-=' | '*=' | '/=' | '%=' | '**=' | '&&=' | '||=') expr  # assignExpr // prec 8
     | primary                                            # primaryExpr
     ;
 
@@ -136,6 +136,8 @@ MUL_ASSIGN  : '*=' ;
 DIV_ASSIGN  : '/=' ;
 MOD_ASSIGN  : '%=' ;
 POW_ASSIGN  : '**=' ;
+AND_ASSIGN  : '&&=' ;
+OR_ASSIGN   : '||=' ;
 EQ          : '==' ;
 NEQ         : '!=' ;
 LE          : '<=' ;

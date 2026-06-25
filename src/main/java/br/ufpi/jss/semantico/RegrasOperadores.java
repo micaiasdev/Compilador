@@ -29,10 +29,7 @@ public final class RegrasOperadores {
                 if (Tipos.ehNumerico(a) && Tipos.ehNumerico(b)) {
                     return Tipos.promoverNumerico(a, b);
                 }
-                if (a == STR && Tipos.ehPrimitivo(b)) {
-                    return STR;
-                }
-                if (b == STR && Tipos.ehPrimitivo(a)) {
+                if (a == STR && b == STR) {
                     return STR;
                 }
                 throw incompativel(linha, "+", a, b);

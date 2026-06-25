@@ -5,6 +5,6 @@ function void main() {
   let real c = 10 / 4 + 1.5;   // 10/4 = 2 (int) ; 2 + 1.5 = 3.5
   let int d = 17 % 5;          // 2
   let bool e = (a > b) || (c < 5.0) && !false;
-  let str s = "a=" + a + " ok=" + true + " c=" + c;
+  let str s = "a=" + str(a) + " ok=" + str(true) + " c=" + str(c);
   console.log(a, b, c, d, e, s);
 }

@@ -117,6 +117,7 @@ public class AnalisadorSemantico extends JSSBaseVisitor<Tipo> {
         for (StatementContext s : ctx.block().statement()) {
             visit(s);
         }
+        exigirRetornoObrigatorio("funcao", nome, retorno, ctx.block(), linha);
         tabela.sairEscopo();
         funcaoAtual = anterior;
         return null;
@@ -440,6 +441,11 @@ public class AnalisadorSemantico extends JSSBaseVisitor<Tipo> {
     }
 
     @Override
+    public Tipo visitPostfixExpr(PostfixExprContext ctx) {
+        return validarIncrementoDecremento(ctx.expr(), ctx.op.getText(), ctx.getStart().getLine());
+    }
+
+    @Override
     public Tipo visitPowExpr(PowExprContext ctx) {
         return RegrasOperadores.binario("**", visit(ctx.expr(0)), visit(ctx.expr(1)), ctx.getStart().getLine());
     }
@@ -589,7 +595,7 @@ public class AnalisadorSemantico extends JSSBaseVisitor<Tipo> {
     }
 
     private Tipo resolverReturnType(ReturnTypeContext rt) {
-        return rt.VOID() != null ? VOID : resolverTipoBase(rt.type());
+        return rt.VOID() != null ? VOID : resolverTipo(rt.type(), rt.arrayDim());
     }
 
     // =====================================================================
@@ -620,17 +626,8 @@ public class AnalisadorSemantico extends JSSBaseVisitor<Tipo> {
     private void analisarCorpoConstrutor(ConstructorDeclContext ctor, SimboloClasse classe) {
         tabela.entrarEscopo();
         declararParametros(ctor.paramList());
-        for (CtorAssignContext ca : ctor.ctorAssign()) {
-            int linha = ca.getStart().getLine();
-            String attr = ca.IDENTIFIER().getText();
-            if (!classe.temAtributo(attr)) {
-                throw erro(linha, "atributo '" + attr + "' não declarado na classe '" + classe.getNome() + "'");
-            }
-            Tipo t = visit(ca.expr());
-            if (!Tipos.compativelAtribuicao(classe.tipoAtributo(attr), t)) {
-                throw erro(linha, "não é possível atribuir " + t.nome() + " ao atributo '" + attr
-                    + "' (" + classe.tipoAtributo(attr).nome() + ")");
-            }
+        for (StatementContext s : ctor.block().statement()) {
+            visit(s);
         }
         tabela.sairEscopo();
     }
@@ -643,6 +640,8 @@ public class AnalisadorSemantico extends JSSBaseVisitor<Tipo> {
         for (StatementContext s : m.block().statement()) {
             visit(s);
         }
+        exigirRetornoObrigatorio("metodo", m.IDENTIFIER().getText(), funcaoAtual.getRetorno(),
+            m.block(), m.getStart().getLine());
         tabela.sairEscopo();
         funcaoAtual = anterior;
     }
@@ -740,6 +739,46 @@ public class AnalisadorSemantico extends JSSBaseVisitor<Tipo> {
     // =====================================================================
     // Auxiliares — diversos
     // =====================================================================
+
+    private void exigirRetornoObrigatorio(String categoria, String nome, Tipo retorno, BlockContext block, int linha) {
+        if (retorno != VOID && !blocoGaranteRetorno(block)) {
+            throw erro(linha, categoria + " '" + nome + "' deve retornar " + retorno.nome());
+        }
+    }
+
+    private boolean blocoGaranteRetorno(BlockContext block) {
+        for (StatementContext s : block.statement()) {
+            if (statementGaranteRetorno(s)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean statementGaranteRetorno(StatementContext statement) {
+        if (statement.returnStmt() != null) {
+            return true;
+        }
+        if (statement.block() != null) {
+            return blocoGaranteRetorno(statement.block());
+        }
+        if (statement.ifStmt() != null) {
+            return ifGaranteRetorno(statement.ifStmt());
+        }
+        return false;
+    }
+
+    private boolean ifGaranteRetorno(IfStmtContext ifStmt) {
+        if (ifStmt.elseBlock() == null || !blocoGaranteRetorno(ifStmt.block())) {
+            return false;
+        }
+        for (ElseIfContext elseIf : ifStmt.elseIf()) {
+            if (!blocoGaranteRetorno(elseIf.block())) {
+                return false;
+            }
+        }
+        return blocoGaranteRetorno(ifStmt.elseBlock().block());
+    }
 
     private void exigirCondicaoBool(ExprContext cond, String construtor) {
         Tipo t = visit(cond);
