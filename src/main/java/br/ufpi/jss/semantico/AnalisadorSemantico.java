@@ -12,9 +12,13 @@ import br.ufpi.jss.tipos.TipoClasse;
 import br.ufpi.jss.tipos.TipoPrimitivo;
 import br.ufpi.jss.tipos.TipoVetor;
 import br.ufpi.jss.tipos.Tipos;
+import org.antlr.v4.runtime.tree.ParseTree;
+import org.antlr.v4.runtime.tree.ParseTreeProperty;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static br.ufpi.jss.tipos.TipoPrimitivo.BOOL;
 import static br.ufpi.jss.tipos.TipoPrimitivo.INT;
@@ -41,6 +45,36 @@ public class AnalisadorSemantico extends JSSBaseVisitor<Tipo> {
 
     /** Profundidade de laços (para validar {@code break}). */
     private int profundidadeLaco;
+
+    // --- Anotações reaproveitadas pelo back-end (gerador Jasmin) ---
+
+    /** Tipo resolvido de cada expressão (árvore anotada). */
+    private final ParseTreeProperty<Tipo> tipos = new ParseTreeProperty<>();
+
+    /** Funções globais declaradas, na ordem de declaração. */
+    private final Map<String, SimboloFuncao> funcoes = new LinkedHashMap<>();
+
+    /** Classes declaradas (layout de atributos, métodos e construtor). */
+    private final Map<String, SimboloClasse> classes = new LinkedHashMap<>();
+
+    /**
+     * Anota cada expressão com o seu tipo enquanto a árvore é percorrida. Como
+     * toda subexpressão é avaliada através de {@link #visit(ParseTree)}, este
+     * único ponto basta para construir a "árvore anotada" usada pelo back-end.
+     */
+    @Override
+    public Tipo visit(ParseTree arvore) {
+        Tipo t = super.visit(arvore);
+        if (t != null && (arvore instanceof ExprContext || arvore instanceof PrimaryContext)) {
+            tipos.put(arvore, t);
+        }
+        return t;
+    }
+
+    /** Resultado da análise para o back-end (tipos anotados + funções + classes). */
+    public InfoSemantica getInfo() {
+        return new InfoSemantica(tipos, funcoes, classes);
+    }
 
     // =====================================================================
     // Declarações de topo
@@ -70,6 +104,7 @@ public class AnalisadorSemantico extends JSSBaseVisitor<Tipo> {
 
         // Registra ANTES do corpo: habilita recursão e impede colisão de nomes.
         tabela.declarar(funcao);
+        funcoes.put(nome, funcao);
 
         if (nome.equals("main") && funcao.aridade() != 0) {
             throw erro(linha, "a função 'main' não pode ter parâmetros");
@@ -93,6 +128,7 @@ public class AnalisadorSemantico extends JSSBaseVisitor<Tipo> {
         String nome = ctx.IDENTIFIER().getText();
         SimboloClasse classe = new SimboloClasse(nome, linha);
         tabela.declarar(classe); // registra o nome antes dos membros (permite auto-referência)
+        classes.put(nome, classe);
 
         // 1ª passada: assinaturas (atributos, construtor, métodos)
         for (AttrDeclContext a : ctx.attrDecl()) {
