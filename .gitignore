@@ -1,0 +1,19 @@
+# Build do Maven
+target/
+
+# Artefatos do ANTLR gerados fora do target (caso gere manualmente)
+*.tokens
+*.interp
+gen/
+
+# IDEs
+.idea/
+*.iml
+.vscode/
+.classpath
+.project
+.settings/
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
