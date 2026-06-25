@@ -16,7 +16,31 @@ $ok = 0
 $falhas = 0
 
 function Compilar($caminho) {
-    return (Get-Content $caminho -Raw | java -jar $jar | Select-Object -First 1)
+    $linhas = @(Get-Content $caminho -Raw | java -jar $jar)
+    return ($linhas -join [Environment]::NewLine)
+}
+
+function ResumoSaida($saida) {
+    return (($saida -split "\r?\n") -join " | ")
+}
+
+function EhErroCompilacao($saida) {
+    $linhas = @($saida -split "\r?\n" | Where-Object { $_ -ne "" })
+    if ($linhas.Count -eq 0) {
+        return $false
+    }
+    return @( $linhas | Where-Object { $_ -notlike "Erro na linha*" } ).Count -eq 0
+}
+
+function ContarErros($saida) {
+    return @( $saida -split "\r?\n" | Where-Object { $_ -like "Erro na linha*" } ).Count
+}
+
+function MinimoErrosEsperados($nomeArquivo) {
+    if ($nomeArquivo -like "16_multiplos_*" -or $nomeArquivo -like "17_multiplos_*") {
+        return 2
+    }
+    return 1
 }
 
 Write-Host "== Casos validos (exemplos/ok) ==" -ForegroundColor Cyan
@@ -26,7 +50,7 @@ foreach ($arquivo in Get-ChildItem "exemplos\ok\*.jss" | Sort-Object Name) {
         Write-Host ("  [OK]    {0}" -f $arquivo.Name)
         $ok++
     } else {
-        Write-Host ("  [FALHA] {0} -> {1}" -f $arquivo.Name, $saida) -ForegroundColor Red
+        Write-Host ("  [FALHA] {0} -> {1}" -f $arquivo.Name, (ResumoSaida $saida)) -ForegroundColor Red
         $falhas++
     }
 }
@@ -34,11 +58,12 @@ foreach ($arquivo in Get-ChildItem "exemplos\ok\*.jss" | Sort-Object Name) {
 Write-Host "== Casos de erro (exemplos/erros) ==" -ForegroundColor Cyan
 foreach ($arquivo in Get-ChildItem "exemplos\erros\*.jss" | Sort-Object Name) {
     $saida = Compilar $arquivo.FullName
-    if ($saida -like "Erro na linha*") {
-        Write-Host ("  [OK]    {0} -> {1}" -f $arquivo.Name, $saida)
+    $minimo = MinimoErrosEsperados $arquivo.Name
+    if ((EhErroCompilacao $saida) -and ((ContarErros $saida) -ge $minimo)) {
+        Write-Host ("  [OK]    {0} -> {1}" -f $arquivo.Name, (ResumoSaida $saida))
         $ok++
     } else {
-        Write-Host ("  [FALHA] {0} -> {1}" -f $arquivo.Name, $saida) -ForegroundColor Red
+        Write-Host ("  [FALHA] {0} -> {1}" -f $arquivo.Name, (ResumoSaida $saida)) -ForegroundColor Red
         $falhas++
     }
 }

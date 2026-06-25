@@ -2,6 +2,7 @@ package br.ufpi.jss.semantico;
 
 import br.ufpi.jss.JSSBaseVisitor;
 import br.ufpi.jss.JSSParser.*;
+import br.ufpi.jss.erro.ColetorErros;
 import br.ufpi.jss.erro.ErroCompilacao;
 import br.ufpi.jss.simbolos.Simbolo;
 import br.ufpi.jss.simbolos.SimboloClasse;
@@ -9,6 +10,7 @@ import br.ufpi.jss.simbolos.SimboloFuncao;
 import br.ufpi.jss.simbolos.TabelaDeSimbolos;
 import br.ufpi.jss.tipos.Tipo;
 import br.ufpi.jss.tipos.TipoClasse;
+import br.ufpi.jss.tipos.TipoErro;
 import br.ufpi.jss.tipos.TipoPrimitivo;
 import br.ufpi.jss.tipos.TipoVetor;
 import br.ufpi.jss.tipos.Tipos;
@@ -36,6 +38,7 @@ import static br.ufpi.jss.tipos.TipoPrimitivo.VOID;
 public class AnalisadorSemantico extends JSSBaseVisitor<Tipo> {
 
     private final TabelaDeSimbolos tabela = new TabelaDeSimbolos();
+    private final ColetorErros erros;
 
     /** Função/método em análise (para validar {@code return}); {@code null} no topo. */
     private SimboloFuncao funcaoAtual;
@@ -57,6 +60,14 @@ public class AnalisadorSemantico extends JSSBaseVisitor<Tipo> {
     /** Classes declaradas (layout de atributos, métodos e construtor). */
     private final Map<String, SimboloClasse> classes = new LinkedHashMap<>();
 
+    public AnalisadorSemantico() {
+        this(new ColetorErros());
+    }
+
+    public AnalisadorSemantico(ColetorErros erros) {
+        this.erros = erros;
+    }
+
     /**
      * Anota cada expressão com o seu tipo enquanto a árvore é percorrida. Como
      * toda subexpressão é avaliada através de {@link #visit(ParseTree)}, este
@@ -64,11 +75,25 @@ public class AnalisadorSemantico extends JSSBaseVisitor<Tipo> {
      */
     @Override
     public Tipo visit(ParseTree arvore) {
-        Tipo t = super.visit(arvore);
+        Tipo t;
+        try {
+            t = super.visit(arvore);
+        } catch (ErroCompilacao e) {
+            erros.adicionar(e);
+            t = tipoErroPara(arvore);
+        }
         if (t != null && (arvore instanceof ExprContext || arvore instanceof PrimaryContext)) {
             tipos.put(arvore, t);
         }
         return t;
+    }
+
+    @Override
+    public Tipo visitProgram(ProgramContext ctx) {
+        for (TopLevelDeclContext decl : ctx.topLevelDecl()) {
+            visit(decl);
+        }
+        return null;
     }
 
     /** Resultado da análise para o back-end (tipos anotados + funções + classes). */
@@ -90,8 +115,12 @@ public class AnalisadorSemantico extends JSSBaseVisitor<Tipo> {
     public Tipo visitConstDecl(ConstDeclContext ctx) {
         int linha = ctx.getStart().getLine();
         Tipo tipo = resolverTipo(ctx.type(), ctx.arrayDim());
-        validarInicializador(tipo, ctx.initializer(), linha);
-        tabela.declarar(new Simbolo(ctx.IDENTIFIER().getText(), tipo, true, true, linha));
+        try {
+            validarInicializador(tipo, ctx.initializer(), linha);
+        } catch (ErroCompilacao e) {
+            erros.adicionar(e);
+        }
+        declararSimbolo(new Simbolo(ctx.IDENTIFIER().getText(), tipo, true, true, linha));
         return null;
     }
 
@@ -103,8 +132,9 @@ public class AnalisadorSemantico extends JSSBaseVisitor<Tipo> {
         SimboloFuncao funcao = new SimboloFuncao(nome, retorno, tiposDeParametros(ctx.paramList()), linha);
 
         // Registra ANTES do corpo: habilita recursão e impede colisão de nomes.
-        tabela.declarar(funcao);
-        funcoes.put(nome, funcao);
+        if (declararSimbolo(funcao)) {
+            funcoes.put(nome, funcao);
+        }
 
         if (nome.equals("main") && funcao.aridade() != 0) {
             throw erro(linha, "a função 'main' não pode ter parâmetros");
@@ -128,8 +158,10 @@ public class AnalisadorSemantico extends JSSBaseVisitor<Tipo> {
         int linha = ctx.getStart().getLine();
         String nome = ctx.IDENTIFIER().getText();
         SimboloClasse classe = new SimboloClasse(nome, linha);
-        tabela.declarar(classe); // registra o nome antes dos membros (permite auto-referência)
-        classes.put(nome, classe);
+        boolean classeDeclarada = declararSimbolo(classe);
+        if (classeDeclarada) {
+            classes.put(nome, classe);
+        }
 
         // 1ª passada: assinaturas (atributos, construtor, métodos)
         for (AttrDeclContext a : ctx.attrDecl()) {
@@ -301,7 +333,7 @@ public class AnalisadorSemantico extends JSSBaseVisitor<Tipo> {
         String nome = ctx.IDENTIFIER().getText();
         Simbolo s = tabela.resolver(nome);
         if (s == null) {
-            throw erro(linha, "identificador '" + nome + "' não declarado");
+            throw erro(linha, "identificador '" + nome + "' nao declarado");
         }
         if (s instanceof SimboloFuncao) {
             throw erro(linha, "'" + nome + "' é uma função e não pode ser usada como valor");
@@ -323,7 +355,7 @@ public class AnalisadorSemantico extends JSSBaseVisitor<Tipo> {
     @Override
     public Tipo visitCastExpr(CastExprContext ctx) {
         Tipo arg = visit(ctx.expr());
-        return ValidadorNativas.validarCast(ctx.castType().getText(), arg, ctx.getStart().getLine());
+        return ValidadorNativas.validarCast(ctx.castType().getText(), arg, ctx.getStart().getLine(), erros);
     }
 
     @Override
@@ -348,9 +380,12 @@ public class AnalisadorSemantico extends JSSBaseVisitor<Tipo> {
     public Tipo visitIndexExpr(IndexExprContext ctx) {
         Tipo arr = visit(ctx.expr(0));
         Tipo idx = visit(ctx.expr(1));
-        if (idx != INT) {
+        if (!Tipos.ehErro(idx) && idx != INT) {
             throw erro(ctx.expr(1).getStart().getLine(),
                 "índice de vetor deve ser do tipo int (encontrado " + idx.nome() + ")");
+        }
+        if (Tipos.ehErro(arr)) {
+            return TipoErro.INSTANCIA;
         }
         if (!(arr instanceof TipoVetor)) {
             throw erro(ctx.getStart().getLine(),
@@ -370,12 +405,15 @@ public class AnalisadorSemantico extends JSSBaseVisitor<Tipo> {
         if (chamada && membro.equals("log") && ehIdentificador(receptor, "console")
                 && tabela.resolver("console") == null) {
             for (ExprContext arg : argumentos(ctx.argList())) {
-                ValidadorNativas.validarTipoConsoleLog(visit(arg), arg.getStart().getLine());
+                ValidadorNativas.validarTipoConsoleLog(visit(arg), arg.getStart().getLine(), erros);
             }
             return VOID;
         }
 
         Tipo tipoReceptor = visit(receptor);
+        if (Tipos.ehErro(tipoReceptor)) {
+            return TipoErro.INSTANCIA;
+        }
         if (!(tipoReceptor instanceof TipoClasse)) {
             throw erro(linha, "acesso a '." + membro + "' em um valor que não é objeto (tipo "
                 + tipoReceptor.nome() + ")");
@@ -437,7 +475,7 @@ public class AnalisadorSemantico extends JSSBaseVisitor<Tipo> {
         if (op.equals("++") || op.equals("--")) {
             return validarIncrementoDecremento(ctx.expr(), op, linha);
         }
-        return RegrasOperadores.unario(op, visit(ctx.expr()), linha);
+        return RegrasOperadores.unario(op, visit(ctx.expr()), linha, erros);
     }
 
     @Override
@@ -447,41 +485,41 @@ public class AnalisadorSemantico extends JSSBaseVisitor<Tipo> {
 
     @Override
     public Tipo visitPowExpr(PowExprContext ctx) {
-        return RegrasOperadores.binario("**", visit(ctx.expr(0)), visit(ctx.expr(1)), ctx.getStart().getLine());
+        return RegrasOperadores.binario("**", visit(ctx.expr(0)), visit(ctx.expr(1)), ctx.getStart().getLine(), erros);
     }
 
     @Override
     public Tipo visitMulExpr(MulExprContext ctx) {
         return RegrasOperadores.binario(ctx.op.getText(), visit(ctx.expr(0)), visit(ctx.expr(1)),
-            ctx.getStart().getLine());
+            ctx.getStart().getLine(), erros);
     }
 
     @Override
     public Tipo visitAddExpr(AddExprContext ctx) {
         return RegrasOperadores.binario(ctx.op.getText(), visit(ctx.expr(0)), visit(ctx.expr(1)),
-            ctx.getStart().getLine());
+            ctx.getStart().getLine(), erros);
     }
 
     @Override
     public Tipo visitRelExpr(RelExprContext ctx) {
         return RegrasOperadores.binario(ctx.op.getText(), visit(ctx.expr(0)), visit(ctx.expr(1)),
-            ctx.getStart().getLine());
+            ctx.getStart().getLine(), erros);
     }
 
     @Override
     public Tipo visitEqExpr(EqExprContext ctx) {
         return RegrasOperadores.binario(ctx.op.getText(), visit(ctx.expr(0)), visit(ctx.expr(1)),
-            ctx.getStart().getLine());
+            ctx.getStart().getLine(), erros);
     }
 
     @Override
     public Tipo visitAndExpr(AndExprContext ctx) {
-        return RegrasOperadores.binario("&&", visit(ctx.expr(0)), visit(ctx.expr(1)), ctx.getStart().getLine());
+        return RegrasOperadores.binario("&&", visit(ctx.expr(0)), visit(ctx.expr(1)), ctx.getStart().getLine(), erros);
     }
 
     @Override
     public Tipo visitOrExpr(OrExprContext ctx) {
-        return RegrasOperadores.binario("||", visit(ctx.expr(0)), visit(ctx.expr(1)), ctx.getStart().getLine());
+        return RegrasOperadores.binario("||", visit(ctx.expr(0)), visit(ctx.expr(1)), ctx.getStart().getLine(), erros);
     }
 
     @Override
@@ -491,10 +529,11 @@ public class AnalisadorSemantico extends JSSBaseVisitor<Tipo> {
         ExprContext alvoCtx = ctx.expr(0);
 
         Tipo tipoAlvo = analisarAlvo(alvoCtx);
-        if (!alvoMutavel(alvoCtx)) {
+        Tipo tipoValor = visit(ctx.expr(1));
+
+        if (!Tipos.ehErro(tipoAlvo) && !alvoMutavel(alvoCtx)) {
             throw erro(linha, "não é possível atribuir a uma constante");
         }
-        Tipo tipoValor = visit(ctx.expr(1));
 
         if (op.equals("=")) {
             if (!Tipos.compativelAtribuicao(tipoAlvo, tipoValor)) {
@@ -502,7 +541,7 @@ public class AnalisadorSemantico extends JSSBaseVisitor<Tipo> {
             }
         } else {
             String base = op.substring(0, op.length() - 1); // "+=" -> "+", "**=" -> "**"
-            Tipo resultado = RegrasOperadores.binario(base, tipoAlvo, tipoValor, linha);
+            Tipo resultado = RegrasOperadores.binario(base, tipoAlvo, tipoValor, linha, erros);
             if (!Tipos.compativelAtribuicao(tipoAlvo, resultado)) {
                 throw erro(linha, "não é possível atribuir " + resultado.nome() + " a " + tipoAlvo.nome());
             }
@@ -514,6 +553,16 @@ public class AnalisadorSemantico extends JSSBaseVisitor<Tipo> {
     // Auxiliares — declarações e tipos
     // =====================================================================
 
+    private boolean declararSimbolo(Simbolo simbolo) {
+        if (tabela.declaradoNoEscopoAtual(simbolo.getNome())) {
+            erros.adicionar(simbolo.getLinha(),
+                "identificador '" + simbolo.getNome() + "' ja declarado neste escopo");
+            return false;
+        }
+        tabela.declarar(simbolo);
+        return true;
+    }
+
     private void declararVariaveis(TypeContext typeCtx, ArrayDimContext dimCtx,
                                    List<VarInitContext> inits, boolean constante) {
         Tipo tipo = resolverTipo(typeCtx, dimCtx);
@@ -521,13 +570,23 @@ public class AnalisadorSemantico extends JSSBaseVisitor<Tipo> {
             int linha = vi.getStart().getLine();
             boolean temInit = vi.initializer() != null;
             if (temInit) {
-                validarInicializador(tipo, vi.initializer(), linha);
+                try {
+                    validarInicializador(tipo, vi.initializer(), linha);
+                } catch (ErroCompilacao e) {
+                    erros.adicionar(e);
+                }
             }
-            tabela.declarar(new Simbolo(vi.IDENTIFIER().getText(), tipo, constante, temInit, linha));
+            declararSimbolo(new Simbolo(vi.IDENTIFIER().getText(), tipo, constante, temInit, linha));
         }
     }
 
     private void validarInicializador(Tipo tipoDeclarado, InitializerContext ini, int linha) {
+        if (Tipos.ehErro(tipoDeclarado)) {
+            if (ini.expr() != null) {
+                visit(ini.expr());
+            }
+            return;
+        }
         if (ini.arrayLiteral() != null) {
             if (!(tipoDeclarado instanceof TipoVetor)) {
                 throw erro(linha, "literal de vetor atribuído a um tipo não-vetor (" + tipoDeclarado.nome() + ")");
@@ -570,7 +629,7 @@ public class AnalisadorSemantico extends JSSBaseVisitor<Tipo> {
         }
         for (ExprContext dim : dimCtx.expr()) { // dimensões informadas devem ser int
             Tipo td = visit(dim);
-            if (td != INT) {
+            if (!Tipos.ehErro(td) && td != INT) {
                 throw erro(dim.getStart().getLine(), "dimensão de vetor deve ser do tipo int (encontrado "
                     + td.nome() + ")");
             }
@@ -587,7 +646,8 @@ public class AnalisadorSemantico extends JSSBaseVisitor<Tipo> {
             String nome = typeCtx.IDENTIFIER().getText();
             Simbolo s = tabela.resolver(nome);
             if (!(s instanceof SimboloClasse)) {
-                throw erro(typeCtx.getStart().getLine(), "tipo '" + nome + "' não declarado");
+                erros.adicionar(typeCtx.getStart().getLine(), "tipo '" + nome + "' nao declarado");
+                return TipoErro.INSTANCIA;
             }
             return ((SimboloClasse) s).getTipoClasse();
         }
@@ -618,7 +678,7 @@ public class AnalisadorSemantico extends JSSBaseVisitor<Tipo> {
         }
         for (ParamContext p : pl.param()) {
             int linha = p.getStart().getLine();
-            tabela.declarar(new Simbolo(p.IDENTIFIER().getText(), resolverTipo(p.type(), p.arrayDim()),
+            declararSimbolo(new Simbolo(p.IDENTIFIER().getText(), resolverTipo(p.type(), p.arrayDim()),
                 false, true, linha));
         }
     }
@@ -676,7 +736,7 @@ public class AnalisadorSemantico extends JSSBaseVisitor<Tipo> {
             if (!s.isMutavel()) {
                 throw erro(arg.getStart().getLine(), "input não pode escrever na constante '" + nome + "'");
             }
-            ValidadorNativas.validarTipoInput(s.getTipo(), arg.getStart().getLine());
+            ValidadorNativas.validarTipoInput(s.getTipo(), arg.getStart().getLine(), erros);
         }
     }
 
@@ -691,10 +751,12 @@ public class AnalisadorSemantico extends JSSBaseVisitor<Tipo> {
             String nome = id.IDENTIFIER().getText();
             Simbolo s = tabela.resolver(nome);
             if (s == null) {
-                throw erro(linha, "identificador '" + nome + "' não declarado");
+                erros.adicionar(linha, "identificador '" + nome + "' nao declarado");
+                return TipoErro.INSTANCIA;
             }
             if (s instanceof SimboloFuncao || s instanceof SimboloClasse) {
-                throw erro(linha, "'" + nome + "' não é uma variável");
+                erros.adicionar(linha, "'" + nome + "' nao e uma variavel");
+                return TipoErro.INSTANCIA;
             }
             return s.getTipo();
         }
@@ -704,7 +766,8 @@ public class AnalisadorSemantico extends JSSBaseVisitor<Tipo> {
         if (alvo instanceof MemberExprContext && ((MemberExprContext) alvo).LPAREN() == null) {
             return visit(alvo);
         }
-        throw erro(linha, "lado esquerdo da atribuição não é atribuível");
+        erros.adicionar(linha, "lado esquerdo da atribuicao nao e atribuivel");
+        return TipoErro.INSTANCIA;
     }
 
     private boolean alvoMutavel(ExprContext alvo) {
@@ -727,6 +790,9 @@ public class AnalisadorSemantico extends JSSBaseVisitor<Tipo> {
 
     private Tipo validarIncrementoDecremento(ExprContext operando, String op, int linha) {
         Tipo tipo = analisarAlvo(operando);
+        if (Tipos.ehErro(tipo)) {
+            return TipoErro.INSTANCIA;
+        }
         if (!Tipos.ehNumerico(tipo)) {
             throw erro(linha, "operador '" + op + "' requer uma variável numérica (int ou real)");
         }
@@ -782,7 +848,7 @@ public class AnalisadorSemantico extends JSSBaseVisitor<Tipo> {
 
     private void exigirCondicaoBool(ExprContext cond, String construtor) {
         Tipo t = visit(cond);
-        if (t != BOOL) {
+        if (!Tipos.ehErro(t) && t != BOOL) {
             throw erro(cond.getStart().getLine(),
                 "a condição de '" + construtor + "' deve ser bool (encontrado " + t.nome() + ")");
         }
@@ -829,5 +895,9 @@ public class AnalisadorSemantico extends JSSBaseVisitor<Tipo> {
 
     private static ErroCompilacao erro(int linha, String descricao) {
         return new ErroCompilacao(linha, descricao);
+    }
+
+    private static Tipo tipoErroPara(ParseTree arvore) {
+        return (arvore instanceof ExprContext || arvore instanceof PrimaryContext) ? TipoErro.INSTANCIA : null;
     }
 }

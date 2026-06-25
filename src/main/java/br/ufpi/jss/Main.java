@@ -11,7 +11,7 @@ import java.nio.charset.StandardCharsets;
  * {@link Compilador} e imprime na saída padrão (UTF-8):</p>
  * <ul>
  *   <li>{@code Linguagem compilada com sucesso}; ou</li>
- *   <li>{@code Erro na linha X: descrição do erro} (parando no primeiro erro).</li>
+ *   <li>uma ou mais linhas {@code Erro na linha X: descrição do erro}.</li>
  * </ul>
  *
  * <p>Uso: {@code java -jar jss-compiler.jar < programa.jss}</p>

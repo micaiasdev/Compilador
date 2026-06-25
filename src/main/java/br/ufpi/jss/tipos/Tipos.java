@@ -15,6 +15,10 @@ public final class Tipos {
         return t == TipoPrimitivo.INT || t == TipoPrimitivo.REAL;
     }
 
+    public static boolean ehErro(Tipo t) {
+        return t == TipoErro.INSTANCIA;
+    }
+
     /** {@code true} se o tipo for um primitivo de valor (int, real, str, bool). */
     public static boolean ehPrimitivo(Tipo t) {
         return t == TipoPrimitivo.INT
@@ -48,6 +52,9 @@ public final class Tipos {
      * </ul>
      */
     public static boolean compativelAtribuicao(Tipo destino, Tipo origem) {
+        if (ehErro(destino) || ehErro(origem)) {
+            return true;
+        }
         if (destino.equals(origem)) {
             return true;
         }
@@ -62,6 +69,9 @@ public final class Tipos {
      * com outro numérico (int &harr; real, com promoção implícita).
      */
     public static boolean comparavelIgualdade(Tipo a, Tipo b) {
+        if (ehErro(a) || ehErro(b)) {
+            return true;
+        }
         if (a.equals(b)) {
             return true;
         }

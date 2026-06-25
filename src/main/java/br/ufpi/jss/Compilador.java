@@ -1,6 +1,7 @@
 package br.ufpi.jss;
 
 import br.ufpi.jss.erro.ErroCompilacao;
+import br.ufpi.jss.erro.ColetorErros;
 import br.ufpi.jss.erro.OuvinteErroSintatico;
 import br.ufpi.jss.semantico.AnalisadorSemantico;
 import org.antlr.v4.runtime.CharStream;
@@ -23,23 +24,32 @@ public final class Compilador {
     /**
      * Compila o conteúdo de um {@link CharStream}.
      *
-     * @return {@link #SUCESSO} ou {@code "Erro na linha X: ..."} no primeiro erro.
+     * @return {@link #SUCESSO} ou uma linha {@code "Erro na linha X: ..."} por erro.
      */
     public String compilar(CharStream entrada) {
+        ColetorErros erros = new ColetorErros();
         try {
             JSSLexer lexer = new JSSLexer(entrada);
             lexer.removeErrorListeners();
-            lexer.addErrorListener(OuvinteErroSintatico.INSTANCIA);
+            lexer.addErrorListener(new OuvinteErroSintatico(erros));
 
             JSSParser parser = new JSSParser(new CommonTokenStream(lexer));
             parser.removeErrorListeners();
-            parser.addErrorListener(OuvinteErroSintatico.INSTANCIA);
+            parser.addErrorListener(new OuvinteErroSintatico(erros));
 
             JSSParser.ProgramContext arvore = parser.program();
-            new AnalisadorSemantico().visit(arvore);
+            if (erros.temErros()) {
+                return erros.mensagensFormatadas();
+            }
+
+            new AnalisadorSemantico(erros).visit(arvore);
+            if (erros.temErros()) {
+                return erros.mensagensFormatadas();
+            }
             return SUCESSO;
         } catch (ErroCompilacao e) {
-            return e.mensagemFormatada();
+            erros.adicionar(e);
+            return erros.mensagensFormatadas();
         }
     }
 
