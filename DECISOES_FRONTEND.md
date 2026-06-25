@@ -2,20 +2,30 @@
 
 Este documento registra as decisões adotadas para implementar o front-end do compilador da linguagem Java Script Simplificado (JSS), com base na especificação do trabalho e nas decisões tomadas pelo grupo.
 
+## Linguagem de Implementação
+
+O front-end é implementado em **Java (JDK 17+)**, usando **ANTLR 4** para gerar o analisador léxico e sintático a partir da gramática `JSS.g4`, e um *visitor* para a análise semântica. O build é feito com **Maven**, que gera o executável `target/jss-compiler.jar` (com o runtime do ANTLR embutido):
+
+```powershell
+mvn clean package
+```
+
+> A decisão anterior do grupo previa Python; foi alterada para **Java** para alinhar com o back-end em **Jasmin** (JVM) e com o uso do ANTLR.
+
 ## Execução do Compilador
 
 O compilador deve ler o código-fonte JSS pela entrada padrão do processo.
 
-Exemplo:
+Exemplo (cmd, ou bash no Linux/macOS — com o redirecionamento `<`):
 
-```powershell
-python compilador.py < programa.jss
+```bat
+java -jar target\jss-compiler.jar < programa.jss
 ```
 
-Também é aceitável redirecionar conteúdo via pipe:
+No **PowerShell**, o operador `<` não é suportado; use o pipe com `-Raw`:
 
 ```powershell
-Get-Content programa.jss | python compilador.py
+Get-Content programa.jss -Raw | java -jar target\jss-compiler.jar
 ```
 
 O compilador não deve depender de abrir diretamente o arquivo pelo caminho recebido como argumento.
