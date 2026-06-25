@@ -47,6 +47,27 @@
                 </executions>
             </plugin>
 
+            <!-- Expõe as classes geradas pelo ANTLR como código-fonte para IDEs como o VS Code -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>build-helper-maven-plugin</artifactId>
+                <version>3.6.0</version>
+                <executions>
+                    <execution>
+                        <id>add-antlr-generated-sources</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>add-source</goal>
+                        </goals>
+                        <configuration>
+                            <sources>
+                                <source>${project.build.directory}/generated-sources/antlr4</source>
+                            </sources>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
             <!-- Empacota um fat jar runnable (jss-compiler.jar) com o antlr4-runtime embutido -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
